@@ -16,7 +16,8 @@ COPY . /code
 # Make all Python scripts in src executable
 RUN chmod ugo+x /code/src/*.py
 
+# Allow scripts in src to run directly
 ENV PATH="/code/src:$PATH"
 
 # Default command to run script
-CMD ["python", "src/seq_alignment.py"]
+CMD ["python", "src/main.py"]
