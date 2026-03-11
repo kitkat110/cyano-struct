@@ -22,12 +22,13 @@ def search_ncbi(search_term: str) -> list:
         id_list: A list of the matching record IDs.
     """
     
-    logging.debug(f"Search for matching NCBI protein records for {search_term}")
-    with Entrez.esearch(db="protein", term=search_term) as h:
+    logging.debug(f"Searching for matching NCBI protein records for {search_term}")
+    with Entrez.esearch(db="protein", term=search_term, retmax=200) as h:
         results = Entrez.read(h)
         id_list = results["IdList"]
     if len(id_list) == 0:
-        logging.warning(f"No matching records for {search_term}")
+        logging.error(f"No matching records for {search_term}")
+        sys.exit(1)
 
     return id_list
 
@@ -42,10 +43,12 @@ def fetch_sequences(id_list: list) -> list:
         seq_list: A list of sequences of matching IDs in FASTA format.
     """
 
-    with Entrez.efetch(db="protein", id=id_list, rettype="fasta", retmode="text", rtmax=50) as h:
+    logging.debug("Retrieving ID sequences")
+    with Entrez.efetch(db="protein", id=id_list, rettype="fasta", retmode="text") as h:
         record = SeqIO.parse(h, "fasta")
         seq_list = list(record)
-        return seq_list
+
+    return seq_list
   
 def save_sequences(sequences: list, output_file: str) -> None:
     """
@@ -58,6 +61,6 @@ def save_sequences(sequences: list, output_file: str) -> None:
     Returns:
         None: This function does not return a value; it writes output to disk.
     """
-
+    
     with open(output_file, "w") as f:
         SeqIO.write(sequences, f, "fasta") 

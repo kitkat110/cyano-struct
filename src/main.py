@@ -35,7 +35,7 @@ logging.basicConfig(level=args.loglevel, format=format_str)
 DATA_DIR = os.path.join(os.getcwd(), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
-SEARCH_TERM = '"Microcystis aeruginosa"[Organism] AND mcyA AND 100:2000[SLEN]'
+SEARCH_TERM = '"Microcystis aeruginosa"[Organism] AND mcyA AND 400:3000[SLEN]'
 
 OUTPUT_FILE = os.path.join(DATA_DIR, "microcystis_sequences.fasta")
 ALIGNED_FILE = os.path.join(DATA_DIR, "aligned_microcystis_sequences.fasta")
