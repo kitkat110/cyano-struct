@@ -1,11 +1,17 @@
+#!/usr/bin/env python3
+
+import os
 import io
 import subprocess
 from Bio import Entrez, SeqIO
 
 Entrez.email = "A.N.Other@example.com"
 
-OUTPUT_FILE = "data/microcystis_sequences.fasta"
-ALIGNED_FILE = "data/aligned_microcystis_sequences.fasta"
+DATA_DIR = os.path.join(os.getcwd(), "data")  # always /code/data inside container
+os.makedirs(DATA_DIR, exist_ok=True)
+
+OUTPUT_FILE = os.path.join(DATA_DIR, "microcystis_sequences.fasta")
+ALIGNED_FILE = os.path.join(DATA_DIR, "aligned_microcystis_sequences.fasta")
 
 
 def search_ncbi():
@@ -23,15 +29,27 @@ def fetch_sequences(id_list):
         record = SeqIO.parse(h, "fasta")
         rec_list = list(record)
         return rec_list
+
+        
 def save_sequences(sequences, output_file):
     with open(output_file, "w") as f:
         SeqIO.write(sequences, f, "fasta") 
 
 def mafft_align_fasta(input_fasta, output_fasta):
-    cmd = ["mafft", "--auto", input_fasta]
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(output_fasta), exist_ok=True)
 
-    with open(output_fasta, "w") as outfile:
-        subprocess.run(cmd, stdout=outfile, check=True)
+    # Build the command
+    cmd = ["mafft", "--auto", "--quiet", input_fasta]
+
+    # Run MAFFT and capture stdout
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+    # Write stdout (the alignment) to output_fasta
+    with open(output_fasta, "w") as f:
+        f.write(result.stdout)
+
+    print(f"Alignment written to {output_fasta}")
 
 def main():
     ids = search_ncbi()
