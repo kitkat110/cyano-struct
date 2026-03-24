@@ -7,6 +7,7 @@ import socket
 
 from seq_retrieval import search_ncbi, fetch_sequences, save_sequences
 from seq_alignment import mafft_align_fasta
+from seq_calcs import calc_metrics
 
 
 # -------------------------
@@ -58,6 +59,9 @@ def main():
 
     logging.info("Running MAFFT alignment")
     mafft_align_fasta(OUTPUT_FILE, ALIGNED_FILE)
+
+    logging.info("Calculating sequence metrics")
+    calc_metrics("data/aligned_microcystis_sequences.fasta")
 
     logging.info("Pipeline complete")
 

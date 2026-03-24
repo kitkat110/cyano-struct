@@ -50,7 +50,8 @@ def fetch_sequences(id_list: list) -> list:
 
     return seq_list
   
-def save_sequences(sequences: list, output_file: str) -> None:
+# No need to save data b/c it's from the web, just add citation with link
+def save_sequences(sequences: list, output_file: str) -> None: 
     """
     Writes the list of sequences to a output FASTA file.
 
