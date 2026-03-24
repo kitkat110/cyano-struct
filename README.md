@@ -11,17 +11,20 @@ From the alignment, evolutionary features such as conservation scores and Shanno
 
 ## Directory Structure
 ```
-my-mbs337-repo/
-└── cyano-struct/
-    ├── data/
-    │   ├── aligned_microcystis_sequences.fasta
-    │   └── microcystis_sequences.fasta
-    ├── src/
-    │   ├── feature_extraction.py
-    │   ├── mut_impact_pred.py
-    │   └── seq_alignment.py
-    ├── Dockerfile
-    └── README.md
+cyano_struct/
+├── data/
+│   ├── aligned_microcystis_sequences.fasta
+│   ├── microcystis_sequences.fasta
+│   └── seq_calc_results.csv
+├── src/
+│   ├── feature_extraction.py
+│   ├── mut_impact_pred.py
+│   ├── seq_alignment.py
+│   ├── seq_calcs.py
+│   ├── seq_retrieval.py
+│   └── main.py
+├── Dockerfile
+└── README.md
 ```
 
 ## Installation
