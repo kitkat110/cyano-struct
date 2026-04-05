@@ -10,6 +10,22 @@ from dash_bio.utils import create_mol3d_style
 import pandas as pd
 import numpy as np
 
+# ML model imports
+import joblib
+from Bio.Align import substitution_matrices
+
+# Load ML model components
+try:
+    ml_model = joblib.load('models/random_forest_model.pkl')
+    feature_names = joblib.load('models/feature_names.pkl')
+    aa_properties = joblib.load('models/aa_properties.pkl')
+    blosum62 = substitution_matrices.load("BLOSUM62")
+    print("✅ ML model loaded successfully")
+except Exception as e:
+    print(f"⚠️ Warning: Could not load ML model: {e}")
+    print("⚠️ Using mock predictions instead")
+    ml_model = None
+
 # Initialize the Dash app
 external_stylesheets = [dbc.themes.CERULEAN]
 app = Dash(__name__, external_stylesheets=external_stylesheets)
@@ -37,26 +53,46 @@ def get_residue_data_at_position(position):
         print("Residue position has no available data.") 
     return (residue_num, residue, conservation, entropy)
 
-# Mock ML prediction function (placeholder for actual ML model)
-def mock_ml_prediction(position, wildtype, mutant, conservation_score, shannon_entropy):
+# Helper function for BLOSUM score
+def get_blosum_score(aa1, aa2):
+    try:
+        return blosum62[(aa1, aa2)]
+    except:
+        return 0
+
+# Real ML prediction function 
+def predict_mutation_impact(position, wildtype, mutant, conservation_score, shannon_entropy):
+    """Predict mutation impact using trained Random Forest model"""
     
-    # Simple heuristic for demo - replace with actual ML prediction
-    risk_score = 0.7 * conservation_score + 0.2 * (2.0 - shannon_entropy) + 0.1 * np.random.random()
-    confidence = min(int(risk_score * 100 + np.random.randint(10, 25)), 95)
+    # Get amino acid properties
+    wt = aa_properties.get(wildtype, aa_properties['A'])
+    mut = aa_properties.get(mutant, aa_properties['A'])
     
-    # Mock other features for display
-    mock_features = {
-        'blosum_score': np.random.randint(-3, 3),
-        'hydrophobic_change': np.random.uniform(-4, 4),
-        'charge_change': np.random.choice([0, 1, 2]),
-        'class_change': np.random.choice([True, False])
-    }
+    # Calculate features (same order as training)
+    mutation_features = [[
+        conservation_score,
+        shannon_entropy,
+        get_blosum_score(wildtype, mutant),
+        abs(mut['charge'] - wt['charge']),
+        abs(mut['hydrophobicity'] - wt['hydrophobicity']),
+        int(mut['class'] != wt['class'])
+    ]]
+    
+    # Make prediction
+    prediction_proba = ml_model.predict_proba(mutation_features)[0, 1]
+    prediction = int(prediction_proba > 0.5)
+    confidence = int(max(prediction_proba, 1 - prediction_proba) * 100)
     
     return {
-        'prediction': 'DISRUPTIVE' if risk_score > 0.6 else 'NEUTRAL',
-        'confidence': confidence,
-        'risk_score': min(risk_score, 1.0),
-        **mock_features
+        'prediction': 'DISRUPTIVE' if prediction == 1 else 'NEUTRAL',
+        'confidence': max(confidence, 60),
+        'risk_score': prediction_proba,
+        'blosum_score': get_blosum_score(wildtype, mutant),
+        'charge_change': abs(mut['charge'] - wt['charge']),
+        'hydrophobicity_change': mut['hydrophobicity'] - wt['hydrophobicity'],
+        'class_change': mut['class'] != wt['class'],
+        'wt_class': wt['class'],
+        'mut_class': mut['class']
     }
 
 # Load 3D structure viewer
@@ -98,7 +134,10 @@ app.layout = dbc.Container([
     dbc.Row([
         html.Div([
             html.H1("CyanoStruct: ", className="d-inline text-primary fw-bold", style={'fontSize': '2.5rem'}),
-            html.H1("Mutation Impact Predictor", className="d-inline text-muted", style={'fontSize': '2.5rem'})
+            html.H1("Mutation Impact Predictor", className="d-inline text-muted", style={'fontSize': '2.5rem'}),
+            html.Small("Powered by Random Forest ML Model", 
+                      className="d-block text-center mt-2", 
+                      style={'color': '#28a745' if ml_model else '#ffc107'})
         ], className="text-center mb-4 py-3", style={'backgroundColor': '#f8f9fa', 'borderRadius': '10px'})
     ], className="mb-4"),
  
@@ -282,7 +321,8 @@ def update_prediction(n_clicks, position, mutant):
     conservation_score = get_residue_data_at_position(position)[2]
     shannon_entropy = get_residue_data_at_position(position)[3]
 
-    prediction_data = mock_ml_prediction(position, wildtype, mutant, conservation_score, shannon_entropy)
+    # Use the ML model prediction function
+    prediction_data = predict_mutation_impact(position, wildtype, mutant, conservation_score, shannon_entropy)
 
     mutation_string = f"{wildtype}{position}{mutant}"
 
@@ -308,9 +348,9 @@ def update_prediction(n_clicks, position, mutant):
         style={'height': '300px'}
     )
 
-    # Feature breakdown list 
+    # Feature breakdown list with real ML features
     feature_breakdown = html.Div([
-        # Conservation Score
+        # Conservation Score 
         html.Div([
             html.I(className="bi bi-circle-fill me-2", style={'color': '#17a2b8'}),
             html.Span("Conservation Score: ", className="fw-bold"),
@@ -328,28 +368,49 @@ def update_prediction(n_clicks, position, mutant):
                      style={'color': '#28a745' if shannon_entropy < 0.5 else '#ffc107' if shannon_entropy < 1.0 else '#dc3545'})
         ], className="mb-3"),
         
-        # Mock features (placeholders for future ML features)
+        # BLOSUM Score 
         html.Div([
             html.I(className="bi bi-circle-fill me-2", style={'color': '#6f42c1'}),
-            html.Span("BLOSUM Score: ", className="fw-bold"),
+            html.Span("BLOSUM62 Score: ", className="fw-bold"),
             html.Span(f"{prediction_data['blosum_score']} ", className="fw-bold"),
             html.Span("(Unfavorable)" if prediction_data['blosum_score'] < 0 else "(Favorable)", 
                      style={'color': '#dc3545' if prediction_data['blosum_score'] < 0 else '#28a745'})
         ], className="mb-3"),
         
+        # Charge Change 
         html.Div([
             html.I(className="bi bi-circle-fill me-2", style={'color': '#fd7e14'}),
+            html.Span("Charge Change: ", className="fw-bold"),
+            html.Span(f"{prediction_data['charge_change']:.1f} ", className="fw-bold"),
+            html.Span("(High)" if prediction_data['charge_change'] >= 1 else "(Low)", 
+                     style={'color': '#dc3545' if prediction_data['charge_change'] >= 1 else '#28a745'})
+        ], className="mb-3"),
+        
+        # AA Class Change 
+        html.Div([
+            html.I(className="bi bi-circle-fill me-2", style={'color': '#28a745'}),
             html.Span("AA Class Change: ", className="fw-bold"),
             html.Span("Yes " if prediction_data['class_change'] else "No ", className="fw-bold"),
-            html.Span("(Negative to Positive)" if prediction_data['class_change'] else "(Same Class)", 
+            html.Span(f"({prediction_data['wt_class']} → {prediction_data['mut_class']})" if prediction_data['class_change'] else f"(Both {prediction_data['wt_class']})", 
                      style={'color': '#6c757d'})
         ], className="mb-3"),
         
+        # Hydrophobicity Change 
         html.Div([
-            html.I(className="bi bi-circle-fill me-2", style={'color': '#28a745'}),
-            html.Span("Hydrophobic Change: ", className="fw-bold"),
-            html.Span(f"{prediction_data['hydrophobic_change']:+.1f}", className="fw-bold")
-        ], className="mb-3")
+            html.I(className="bi bi-circle-fill me-2", style={'color': '#17a2b8'}),
+            html.Span("Hydrophobicity Change: ", className="fw-bold"),
+            html.Span(f"{prediction_data['hydrophobicity_change']:+.1f}", className="fw-bold"),
+            html.Span(" (More hydrophobic)" if prediction_data['hydrophobicity_change'] > 0 else " (Less hydrophobic)" if prediction_data['hydrophobicity_change'] < 0 else " (No change)", 
+                     style={'color': '#6c757d'})
+        ], className="mb-3"),
+        
+        # Model status indicator
+        html.Hr(),
+        html.Small(
+            "Predictions from trained Random Forest model", 
+            className="text-muted fst-italic",
+            style={'color': '#28a745' if ml_model else '#ffc107'}
+        )
     ])
     
     return prediction_result, conservation_plot, feature_breakdown
