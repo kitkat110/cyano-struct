@@ -5,7 +5,6 @@ from Bio.PDB import PDBList
 from Bio.PDB.MMCIFParser import MMCIFParser
 from Bio.SeqIO.FastaIO import SimpleFastaParser
 from Bio.Align import PairwiseAligner
-from pymol import cmd
 
 pdb_list = PDBList()
 
@@ -98,46 +97,4 @@ for i, (pdb_resnum, align_pos) in enumerate(zip(residue_nums, alignment_position
         })
 
 mapping_df = pd.DataFrame(results)
-
-script = [
-    "# Load structure",
-    f"load {"data/8jbr.cif"}",
-    "",
-    "# Color by conservation",
-    "color gray90, all",
-    ""
-]
-
-for index, row in mapping_df.iterrows():
-    conservation = row['Conservation_Score']
-    resnum = row['PDB_ResNum']
-
-    if conservation >= 0.9:
-        color = "red"
-    elif conservation >= 0.7:
-        color = "orange"
-    elif conservation >= 0.5:
-        color = "yellow"
-    else:
-        color = "blue"
-
-    script.append(f"color {color}, resi {resnum}")
-
-script.extend([
-    "",
-    "# Display settings",
-    "hide everything",
-    "show cartoon",
-    "set cartoon_transparency, 0.1",
-    "",
-    "# Legend:",
-    "# Red = Highly conserved (>90%)",
-    "# Orange = Conserved (70-90%)",
-    "# Yellow = Moderate (50-70%)",
-    "# Blue = Variable (<50%)"
-])
-
-with open("conservation_coloring.pml", "w") as f:
-    f.write("\n".join(script))
-
-
+mapping_df.to_csv("data/mapped_scores.csv", index=False)

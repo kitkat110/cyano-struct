@@ -23,7 +23,7 @@ def search_ncbi(search_term: str) -> list:
     """
     
     logging.debug(f"Searching for matching NCBI protein records for {search_term}")
-    with Entrez.esearch(db="protein", term=search_term, retmax=200) as h:
+    with Entrez.esearch(db="protein", term=search_term, retmax=1000) as h:
         results = Entrez.read(h)
         id_list = results["IdList"]
     if len(id_list) == 0:
