@@ -23,7 +23,7 @@ def search_ncbi(search_term: str) -> list:
     """
     
     logging.debug(f"Searching for matching NCBI protein records for {search_term}")
-    with Entrez.esearch(db="protein", term=search_term, retmax=1000) as h:
+    with Entrez.esearch(db="protein", term=search_term, retmax=5000) as h:
         results = Entrez.read(h)
         id_list = results["IdList"]
     if len(id_list) == 0:
@@ -45,8 +45,10 @@ def fetch_sequences(id_list: list) -> list:
 
     logging.debug("Retrieving ID sequences")
     with Entrez.efetch(db="protein", id=id_list, rettype="fasta", retmode="text") as h:
-        record = SeqIO.parse(h, "fasta")
-        seq_list = list(record)
+        record = list(SeqIO.parse(h, "fasta"))
+
+    unique_dict = {str(rec.seq): rec for rec in record}
+    seq_list = list(unique_dict.values())
 
     return seq_list
   
