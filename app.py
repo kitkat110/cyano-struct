@@ -17,14 +17,14 @@ from Bio.Align import substitution_matrices
 # Load ML model components
 try:
     scaler = joblib.load('models/scaler.pkl')
-    pca = joblib.load('models/pca.pkl')
-    kmeans = joblib.load('models/kmeans.pkl')
+    gmm = joblib.load('models/gmm.pkl')
     aa_properties = joblib.load('models/aa_properties.pkl')
+    cluster_names = joblib.load('models/cluster_names.pkl')
     blosum62 = substitution_matrices.load("BLOSUM62")
-    print("✅ Unsupervised models loaded successfully")
+    print("GMM models loaded successfully")
 except Exception as e:
-    print(f"⚠️ Could not load unsupervised models: {e}")
-    scaler = pca = kmeans = None
+    print(f"Could not load models: {e}")
+    scaler = gmm = None
 
 # Initialize the Dash app
 external_stylesheets = [dbc.themes.CERULEAN]
@@ -60,73 +60,22 @@ def get_blosum_score(aa1, aa2):
     except:
         return 0
 
-# Real ML prediction function 
-def predict_mutation_cluster(position, wildtype, mutant, conservation_score, shannon_entropy):
-    """Predict mutation cluster using scaler → PCA → KMeans"""
-    wt = aa_properties.get(wildtype, aa_properties['A'])
-    mut = aa_properties.get(mutant, aa_properties['A'])
-
-    # Features in same order as during training
-    feature_cols = ['conservation_score', 'shannon_entropy', 'blosum_score',
-                'charge_change', 'hydrophobicity_change', 'class_change']
-
-    # Compute features in same order as training
-    features = pd.DataFrame([[
-        conservation_score,
-        shannon_entropy,
-        get_blosum_score(wildtype, mutant),
-        abs(mut['charge'] - wt['charge']),
-        abs(mut['hydrophobicity'] - wt['hydrophobicity']),
-        int(mut['class'] != wt['class'])
-    ]], columns=feature_cols)
-
-    # Apply the pipeline: scaler -> PCA -> KMeans
-    scaled = scaler.transform(features)
-    reduced = pca.transform(scaled)
-    cluster = kmeans.predict(reduced)[0]
-
-    # Optional: map cluster numbers to labels
-    cluster_labels = {0: "Low Risk", 1: "Medium Risk", 2: "High Risk"}
-    cluster_label = cluster_labels.get(cluster, f"Cluster {cluster}")
-
-    return {
-        'cluster': cluster_label,
-        'cluster_id': cluster,
-        'reduced_features': reduced[0],
-        'blosum_score': get_blosum_score(wildtype, mutant),
-        'charge_change': abs(mut['charge'] - wt['charge']),
-        'hydrophobicity_change': mut['hydrophobicity'] - wt['hydrophobicity'],
-        'class_change': mut['class'] != wt['class'],
-        'wt_class': wt['class'],
-        'mut_class': mut['class']
-    }
-
 # Load 3D structure viewer
+pdb_dir = './pdb_files'
+os.makedirs(pdb_dir, exist_ok=True)
+pdb_file = PDBList().retrieve_pdb_file('8JBR', pdir=pdb_dir, file_format='pdb')
+dash_parser = DashPdbParser(pdb_file)
+pdb_data = dash_parser.mol3d_data()
+styles = create_mol3d_style(pdb_data['atoms'], visualization_type='cartoon', color_element='residue')
+
 def load_molecule_viewer():
-    pdb_id = '8JBR'
-
-    pdb_dir = './pdb_files'
-    os.makedirs(pdb_dir, exist_ok=True)
-
-    pdbl = PDBList()
-    pdb_file = pdbl.retrieve_pdb_file(pdb_id, pdir=pdb_dir, file_format='pdb')
-
-    dash_parser = DashPdbParser(pdb_file)
-    pdb_data = dash_parser.mol3d_data()
-
-    styles = create_mol3d_style(
-        pdb_data['atoms'],
-        visualization_type='cartoon',
-        color_element='residue'
-    )
-
     return dashbio.Molecule3dViewer(
         id='molecule-3d',
         modelData=pdb_data,
         styles=styles,
         selectionType='atom',
         backgroundColor='#F8F9FA',
-        height=250,
+        height=410,
         width='100%'
     )
 
@@ -139,10 +88,8 @@ app.layout = dbc.Container([
     # Header
     dbc.Row([
         html.Div([
-            html.H1("CyanoStruct: ", className="d-inline text-primary fw-bold", style={'fontSize': '1.8rem'}),
-            html.H1("Mutation Impact Predictor", className="d-inline text-muted", style={'fontSize': '1.8rem'}),
-            html.Small(className="d-block text-center mt-2",
-                       style={'color': '#28a745' if kmeans else '#ffc107'})
+            html.H1("CyanoStruct: ", className="d-inline text-primary fw-bold", style={'fontSize': '2rem'}),
+            html.H1("Mutation Impact Predictor", className="d-inline text-muted", style={'fontSize': '2rem'})
         ], className="text-center mb-1 py-1", style={'backgroundColor': '#f8f9fa', 'borderRadius': '10px'})
     ], className="mb-1"),
  
@@ -155,43 +102,37 @@ app.layout = dbc.Container([
                     html.H4("Mutation Input", className="mb-0 text-primary")
                 ]),
                 dbc.CardBody([
-                    # Position input
+                    # Top row: Position + Wild-Type side by side
                     dbc.Row([
                         dbc.Col([
-                            dbc.Label("Position:", className="fw-bold mb-2"),
+                            dbc.Label("Position:", className="fw-bold mb-1"),
                             dbc.Input(
                                 id='position-input',
                                 type='number',
-                                value=min_pos + 12,  # Default to position 1281 (D->K example)
+                                value=min_pos + 12,
                                 min=min_pos,
                                 max=max_pos,
-                                className='mb-3',
                                 style={'fontSize': '1.1rem'}
                             ),
-                            html.Small(f"Range: {min_pos}-{max_pos}", 
-                                     className="text-muted")
-                        ])
-                    ]),
-                    
-                    # Wild-type display (auto-populated from your data)
+                            html.Small(f"Range: {min_pos}-{max_pos}", className="text-muted")
+                        ], width=6),
+                        dbc.Col([
+                            dbc.Label("Wild-Type:", className="fw-bold mb-1"),
+                            html.Div(id='wildtype-display',
+                                    style={'fontSize': '1.5rem', 'fontWeight': 'bold',
+                                           'padding': '6px', 'backgroundColor': '#e9ecef',
+                                           'borderRadius': '5px', 'textAlign': 'center'})
+                        ], width=6),
+                    ], className="mb-3"),
+
+                    # Middle row: Mutant dropdown
                     dbc.Row([
                         dbc.Col([
-                            dbc.Label("Wild-Type:", className="fw-bold mb-2"),
-                            html.Div(id='wildtype-display', 
-                                   style={'fontSize': '1.2rem', 'fontWeight': 'bold', 
-                                         'padding': '4px', 'backgroundColor': '#e9ecef',
-                                         'borderRadius': '5px', 'textAlign': 'center'})
-                        ])
-                    ], className="mb-1"),
-                    
-                    # Mutant input
-                    dbc.Row([
-                        dbc.Col([
-                            dbc.Label("Mutant:", className="fw-bold mb-2"),
+                            dbc.Label("Mutant:", className="fw-bold mb-1"),
                             dbc.Select(
                                 id='mutant-input',
                                 options=[
-                                    {'label': f'{aa} - {name}', 'value': aa} 
+                                    {'label': f'{aa} - {name}', 'value': aa}
                                     for aa, name in [
                                         ('A', 'Alanine'), ('R', 'Arginine'), ('N', 'Asparagine'), ('D', 'Aspartic acid'),
                                         ('C', 'Cysteine'), ('Q', 'Glutamine'), ('E', 'Glutamic acid'), ('G', 'Glycine'),
@@ -201,24 +142,26 @@ app.layout = dbc.Container([
                                     ]
                                 ],
                                 value='K',
-                                className='mb-4',
                                 style={'fontSize': '1.1rem'}
                             )
-                        ])
-                    ]),
-                    
-                    # Predict button
-                    dbc.Button(
-                        "Predict Mutation Impact",
-                        id='predict-button',
-                        color="primary",
-                        size="lg",
-                        className="w-100",
-                        style={'padding': '12px'}
-                    )
-                ])
+                        ], width=12),
+                    # Bottom row: Predict button
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Label("\u00a0", className="d-block mb-1"),
+                            dbc.Button(
+                                "Predict Mutation Impact",
+                                id='predict-button',
+                                color="primary",
+                                size="lg",
+                                className="w-100",
+                            )
+                        ], width=12)
+                    ])
+                    ])
+                ], style={'padding': '0.75rem'})
             ], className="shadow-sm", style={'height': '100%'})
-        ], width=3),
+        ], width=4), 
  
         # Right column - Prediction Result
         dbc.Col([
@@ -235,8 +178,8 @@ app.layout = dbc.Container([
                     ])
                 ])
             ], className="shadow-sm", style={'height': '100%'})
-        ], width=9)
-    ], className="mb-4", style={'height': '50vh'}),
+        ], width=8)
+    ], className="mb-4", style={'height': '40vh'}),
  
     # Bottom row
     dbc.Row([
@@ -278,10 +221,14 @@ app.layout = dbc.Container([
                     html.Div(id='structural-view', children=[
                         html.Div([
                             load_molecule_viewer()
-                        ], style={'height': '300px'}),
-                        html.Hr()
+                        ], style={'display': 'flex',
+                                  'justifyContent': 'center',
+                                  'alignItems': 'center',
+                                  'height': '321px',
+                                  'width': '600px',
+                                  'margin': '0 auto'})
                     ])
-                ], style={'height': 'calc(100% - 45px)', 'overflowY': 'auto'})
+                ], style={'height': 'calc(100% - 45px)', 'overflow': 'hidden', 'padding': '0.5rem'})
             ], className="shadow-sm", style={'height': '100%', 'overflow': 'hidden'})
         ], width=6, style={'height': '100%'})
     ])
@@ -299,6 +246,77 @@ def update_wildtype_display(position):
     residue = get_residue_data_at_position(position)[1]
     return residue
 
+@callback(
+    [Output('molecule-3d', 'labels'),
+     Output('molecule-3d', 'styles')],
+    Input('position-input', 'value'),
+    prevent_initial_call=True
+)
+def update_molecule_visuals(position):
+
+    if position is None:
+        return [], styles
+
+    pdb_index = int(position) - 1269
+
+    atom = next(
+        (
+            a for a in pdb_data['atoms']
+            if int(a['residue_index']) == pdb_index
+        ),
+        None
+    )
+
+    if atom is None:
+        return [], styles
+
+    pos = atom['positions']
+    residue_name = atom.get('residue_name', '')
+
+    # ---------- LABEL ----------
+    labels = [{
+        'text': f'{residue_name}{position}',
+        'position': {
+            'x': pos[0],
+            'y': pos[1],
+            'z': pos[2]
+        },
+        'fontColor': '#ffffff',
+        'font': 'Arial',
+        'fontSize': 16,
+        'showBackground': True,
+        'backgroundColor': '#000000',
+    }]
+
+    # ---------- STYLE ----------
+    highlight_styles = []
+
+    # ALL residues = grey
+    highlight_styles.append({
+        "visualization_type": "cartoon",
+        "color": "lightgrey"
+    })
+
+    # nearby residues = blue
+    nearby_range = range(pdb_index - 5, pdb_index + 6)
+
+    for nearby_idx in nearby_range:
+
+        highlight_styles.append({
+            "residue_index": nearby_idx,
+            "visualization_type": "cartoon",
+            "color": "blue"
+        })
+
+    # selected residue = red
+    highlight_styles.append({
+        "residue_index": pdb_index,
+        "visualization_type": "cartoon",
+        "color": "red"
+    })
+
+    return labels, highlight_styles
+
 # Callback to load and display molecule
 @callback(
     [Output('prediction-result', 'children'),
@@ -309,6 +327,7 @@ def update_wildtype_display(position):
      State('mutant-input', 'value')],
     prevent_initial_call=True
 )
+
 def update_prediction(n_clicks, position, mutant):
     if n_clicks is None or position is None:
         return "", "", ""
@@ -333,26 +352,34 @@ def update_prediction(n_clicks, position, mutant):
     ]], columns=['conservation_score','shannon_entropy','blosum_score',
                   'charge_change','hydrophobicity_change','class_change'])
     
-    # Scale and predict KMeans cluster
     scaled = scaler.transform(features_df)
-    cluster = kmeans.predict(scaled)[0]
+    cluster = gmm.predict(scaled)[0]
+    probs = gmm.predict_proba(scaled)[0]
+    confidence = int(probs.max() * 100)
 
-    # Assign a label based on cluster (example: 0=Neutral, 1=Disruptive)
-    prediction_label = "DISRUPTIVE" if cluster == 1 else "NEUTRAL"
-    prediction_color = "danger" if prediction_label == 'DISRUPTIVE' else "success"
-    
-    # Risk/confidence score as a mock from distance to cluster center
-    risk_score = np.linalg.norm(scaled - kmeans.cluster_centers_[cluster])
-    confidence = int(max(0.6, 1 - risk_score) * 100)  # min 60% confidence
-    
+    cluster_names_inv = {v: k for k, v in cluster_names.items()}
+
+    prediction_label = cluster_names.get(cluster, f'Cluster {cluster}').upper()
+    color_map = {'DISRUPTIVE': 'danger', 'MODERATE': 'warning', 'NEUTRAL': 'success'}
+    prediction_color = color_map.get(prediction_label, 'secondary')
+
+    typicality = gmm.score_samples(scaled)[0] #Higher score = more typical
+
     # Prediction card
     mutation_string = f"{wildtype}{position}{mutant}"
     prediction_result = dbc.Alert([
-        html.H3(f"Prediction: {prediction_label}", className="mb-2 text-white fw-bold"),
-        html.P(f"Mutation: {mutation_string}", className="mb-2 text-white fs-6"),
-        html.P(f"Confidence: {confidence}%", className="mb-1 text-white fs-5"),
-        html.P(f"Risk Score: {risk_score:.2f}", className="mb-0 text-white fs-5")
-    ], color=prediction_color, className="text-center py-4")
+    html.H3(f"Prediction: {prediction_label}", className="mb-2 text-white fw-bold"),
+    html.P(f"Mutation: {mutation_string}", className="mb-2 text-white fs-6"),
+    html.P(f"Confidence: {confidence}%", className="mb-1 text-white fs-5"),
+    html.P(f"Typicality Score: {typicality:.2f}", className="mb-2 text-white fs-5"),
+    html.Hr(style={'borderColor': 'rgba(255,255,255,0.3)'}),
+    html.Div([
+        html.Small(f"Neutral: {probs[cluster_names_inv['Neutral']]*100:.0f}%  |  "
+                   f"Moderate: {probs[cluster_names_inv['Moderate']]*100:.0f}%  |  "
+                   f"Disruptive: {probs[cluster_names_inv['Disruptive']]*100:.0f}%",
+                   className="text-white")
+    ])
+], color=prediction_color, className="text-center py-4")
     
     # Conservation plot
     conservation_plot = dcc.Graph(
@@ -380,11 +407,11 @@ def update_prediction(n_clicks, position, mutant):
         html.P(f"Conservation Score: {conservation_score:.3f} {cons_label}", style={'color': cons_color, 'fontWeight':'bold'}),
         html.P(f"Shannon Entropy: {shannon_entropy:.3f} {entropy_label}", style={'color': entropy_color, 'fontWeight':'bold'}),
         html.P(f"BLOSUM62 Score: {features_df['blosum_score'][0]} ({blosum_label})", style={'color': blosum_color, 'fontWeight':'bold'}),
-        html.P(f"Charge Change: {features_df['charge_change'][0]:.1f} ({charge_label})", style={'color': charge_color, 'fontWeight':'bold'}),
+        html.P(f"Charge Change: {features_df['charge_change'][0]:.1f} {charge_label}", style={'color': charge_color, 'fontWeight':'bold'}),
         html.P(f"AA Class Change: {'Yes' if features_df['class_change'][0] else 'No'}", style={'fontWeight':'bold'}),
         html.P(f"Hydrophobicity Change: {features_df['hydrophobicity_change'][0]:+.1f} ({hyd_label})", style={'fontWeight':'bold'}),
         html.Hr(),
-        html.Small("Predictions from trained KMeans model", className="text-muted fst-italic")
+        html.Small("Predictions from trained Gaussian Mixture Model", className="text-muted fst-italic")
     ])
     
     return prediction_result, conservation_plot, feature_breakdown
@@ -397,7 +424,9 @@ def create_conservation_plot(mutation_position):
         x=conservation_df['PDB_ResNum'],
         y=conservation_df['Conservation_Score'],
         mode='lines',
-        line=dict(color='#007bff', width=2),
+        fill='tozeroy',
+        line=dict(color='#007bff', width=1.5),
+        fillcolor='rgba(33, 150, 243, 0.15)',
         name='Conservation Score',
         hovertemplate='Position: %{x}<br>Conservation: %{y:.3f}<br>Residue: %{text}<extra></extra>',
         text=conservation_df['Residue'] if 'Residue' in conservation_df.columns else [''] * len(conservation_df)
@@ -422,7 +451,7 @@ def create_conservation_plot(mutation_position):
         showlegend=False,
         margin=dict(l=40, r=20, t=40, b=40),
         plot_bgcolor='rgba(248,249,250,0.8)',
-        yaxis=dict(range=[0, 1])
+        yaxis=dict(range=[0.3, 1])
     )
     
     return fig
