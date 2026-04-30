@@ -16,15 +16,15 @@ from Bio.Align import substitution_matrices
 
 # Load ML model components
 try:
-    ml_model = joblib.load('models/random_forest_model.pkl')
-    feature_names = joblib.load('models/feature_names.pkl')
+    scaler = joblib.load('models/scaler.pkl')
+    pca = joblib.load('models/pca.pkl')
+    kmeans = joblib.load('models/kmeans.pkl')
     aa_properties = joblib.load('models/aa_properties.pkl')
     blosum62 = substitution_matrices.load("BLOSUM62")
-    print("✅ ML model loaded successfully")
+    print("✅ Unsupervised models loaded successfully")
 except Exception as e:
-    print(f"⚠️ Warning: Could not load ML model: {e}")
-    print("⚠️ Using mock predictions instead")
-    ml_model = None
+    print(f"⚠️ Could not load unsupervised models: {e}")
+    scaler = pca = kmeans = None
 
 # Initialize the Dash app
 external_stylesheets = [dbc.themes.CERULEAN]
@@ -61,32 +61,38 @@ def get_blosum_score(aa1, aa2):
         return 0
 
 # Real ML prediction function 
-def predict_mutation_impact(position, wildtype, mutant, conservation_score, shannon_entropy):
-    """Predict mutation impact using trained Random Forest model"""
-    
-    # Get amino acid properties
+def predict_mutation_cluster(position, wildtype, mutant, conservation_score, shannon_entropy):
+    """Predict mutation cluster using scaler → PCA → KMeans"""
     wt = aa_properties.get(wildtype, aa_properties['A'])
     mut = aa_properties.get(mutant, aa_properties['A'])
-    
-    # Calculate features (same order as training)
-    mutation_features = [[
+
+    # Features in same order as during training
+    feature_cols = ['conservation_score', 'shannon_entropy', 'blosum_score',
+                'charge_change', 'hydrophobicity_change', 'class_change']
+
+    # Compute features in same order as training
+    features = pd.DataFrame([[
         conservation_score,
         shannon_entropy,
         get_blosum_score(wildtype, mutant),
         abs(mut['charge'] - wt['charge']),
         abs(mut['hydrophobicity'] - wt['hydrophobicity']),
         int(mut['class'] != wt['class'])
-    ]]
-    
-    # Make prediction
-    prediction_proba = ml_model.predict_proba(mutation_features)[0, 1]
-    prediction = int(prediction_proba > 0.5)
-    confidence = int(max(prediction_proba, 1 - prediction_proba) * 100)
-    
+    ]], columns=feature_cols)
+
+    # Apply the pipeline: scaler -> PCA -> KMeans
+    scaled = scaler.transform(features)
+    reduced = pca.transform(scaled)
+    cluster = kmeans.predict(reduced)[0]
+
+    # Optional: map cluster numbers to labels
+    cluster_labels = {0: "Low Risk", 1: "Medium Risk", 2: "High Risk"}
+    cluster_label = cluster_labels.get(cluster, f"Cluster {cluster}")
+
     return {
-        'prediction': 'DISRUPTIVE' if prediction == 1 else 'NEUTRAL',
-        'confidence': max(confidence, 60),
-        'risk_score': prediction_proba,
+        'cluster': cluster_label,
+        'cluster_id': cluster,
+        'reduced_features': reduced[0],
         'blosum_score': get_blosum_score(wildtype, mutant),
         'charge_change': abs(mut['charge'] - wt['charge']),
         'hydrophobicity_change': mut['hydrophobicity'] - wt['hydrophobicity'],
@@ -133,13 +139,12 @@ app.layout = dbc.Container([
     # Header
     dbc.Row([
         html.Div([
-            html.H1("CyanoStruct: ", className="d-inline text-primary fw-bold", style={'fontSize': '2.5rem'}),
-            html.H1("Mutation Impact Predictor", className="d-inline text-muted", style={'fontSize': '2.5rem'}),
-            html.Small("Powered by Random Forest ML Model", 
-                      className="d-block text-center mt-2", 
-                      style={'color': '#28a745' if ml_model else '#ffc107'})
-        ], className="text-center mb-4 py-3", style={'backgroundColor': '#f8f9fa', 'borderRadius': '10px'})
-    ], className="mb-4"),
+            html.H1("CyanoStruct: ", className="d-inline text-primary fw-bold", style={'fontSize': '1.8rem'}),
+            html.H1("Mutation Impact Predictor", className="d-inline text-muted", style={'fontSize': '1.8rem'}),
+            html.Small(className="d-block text-center mt-2",
+                       style={'color': '#28a745' if kmeans else '#ffc107'})
+        ], className="text-center mb-1 py-1", style={'backgroundColor': '#f8f9fa', 'borderRadius': '10px'})
+    ], className="mb-1"),
  
     # Main content
     dbc.Row([
@@ -173,11 +178,11 @@ app.layout = dbc.Container([
                         dbc.Col([
                             dbc.Label("Wild-Type:", className="fw-bold mb-2"),
                             html.Div(id='wildtype-display', 
-                                   style={'fontSize': '1.5rem', 'fontWeight': 'bold', 
-                                         'padding': '10px', 'backgroundColor': '#e9ecef',
+                                   style={'fontSize': '1.2rem', 'fontWeight': 'bold', 
+                                         'padding': '4px', 'backgroundColor': '#e9ecef',
                                          'borderRadius': '5px', 'textAlign': 'center'})
                         ])
-                    ], className="mb-3"),
+                    ], className="mb-1"),
                     
                     # Mutant input
                     dbc.Row([
@@ -212,7 +217,7 @@ app.layout = dbc.Container([
                         style={'padding': '12px'}
                     )
                 ])
-            ], className="shadow-sm")
+            ], className="shadow-sm", style={'height': '100%'})
         ], width=3),
  
         # Right column - Prediction Result
@@ -229,11 +234,11 @@ app.layout = dbc.Container([
                         ])
                     ])
                 ])
-            ], className="shadow-sm")
-        ], width=3)
-    ], className="mb-4"),
+            ], className="shadow-sm", style={'height': '100%'})
+        ], width=9)
+    ], className="mb-4", style={'height': '50vh'}),
  
-    # Analysis Section
+    # Bottom row
     dbc.Row([
         # Feature Analysis with plot on left, breakdown on right
         dbc.Col([
@@ -259,9 +264,9 @@ app.layout = dbc.Container([
                             ])
                         ], width=6)
                     ])
-                ])
-            ], className="shadow-sm")
-        ], width=6),
+                ], style={'height': 'calc(100% - 45px)', 'overflowY': 'auto'})
+            ], className="shadow-sm", style={'height': '100%', 'overflow': 'hidden'})
+        ], width=6, style={'height': '100%'}),
         
         # Structural View
         dbc.Col([
@@ -274,21 +279,13 @@ app.layout = dbc.Container([
                         html.Div([
                             load_molecule_viewer()
                         ], style={'height': '300px'}),
-                        html.Hr(),
-                        html.Div([
-                            html.P([
-                                html.Span("Distance to Active Site: ", className="fw-bold")
-                            ], className="mb-1"),
-                            html.P([
-                                html.Span("Solvent Accessibility: ", className="fw-bold")
-                            ], className="mb-0")
-                        ], className="text-center")
+                        html.Hr()
                     ])
-                ])
-            ], className="shadow-sm")
-        ], width=6)
+                ], style={'height': 'calc(100% - 45px)', 'overflowY': 'auto'})
+            ], className="shadow-sm", style={'height': '100%', 'overflow': 'hidden'})
+        ], width=6, style={'height': '100%'})
     ])
-])
+], fluid=True, style={'flex': '1 1 0', 'minHeight': '0', 'overflow': 'hidden'})
 
 # Callback to update wild-type display
 @callback(
@@ -305,112 +302,89 @@ def update_wildtype_display(position):
 # Callback to load and display molecule
 @callback(
     [Output('prediction-result', 'children'),
-    Output('conservation-plot', 'children'),
-    Output('feature-breakdown', 'children')],
+     Output('conservation-plot', 'children'),
+     Output('feature-breakdown', 'children')],
     Input('predict-button', 'n_clicks'),
     [State('position-input', 'value'),
-    State('mutant-input', 'value')],
+     State('mutant-input', 'value')],
     prevent_initial_call=True
 )
-
 def update_prediction(n_clicks, position, mutant):
     if n_clicks is None or position is None:
         return "", "", ""
+    
+    # Get wildtype and residue info
+    residue_info = get_residue_data_at_position(position)
+    wildtype = residue_info[1]
+    conservation_score = residue_info[2]
+    shannon_entropy = residue_info[3]
 
-    wildtype = get_residue_data_at_position(position)[1]
-    conservation_score = get_residue_data_at_position(position)[2]
-    shannon_entropy = get_residue_data_at_position(position)[3]
+    # Construct feature vector
+    wt_props = aa_properties.get(wildtype, aa_properties['A'])
+    mut_props = aa_properties.get(mutant, aa_properties['A'])
+    
+    features_df = pd.DataFrame([[
+        conservation_score,
+        shannon_entropy,
+        get_blosum_score(wildtype, mutant),
+        abs(mut_props['charge'] - wt_props['charge']),
+        abs(mut_props['hydrophobicity'] - wt_props['hydrophobicity']),
+        int(mut_props['class'] != wt_props['class'])
+    ]], columns=['conservation_score','shannon_entropy','blosum_score',
+                  'charge_change','hydrophobicity_change','class_change'])
+    
+    # Scale and predict KMeans cluster
+    scaled = scaler.transform(features_df)
+    cluster = kmeans.predict(scaled)[0]
 
-    # Use the ML model prediction function
-    prediction_data = predict_mutation_impact(position, wildtype, mutant, conservation_score, shannon_entropy)
-
+    # Assign a label based on cluster (example: 0=Neutral, 1=Disruptive)
+    prediction_label = "DISRUPTIVE" if cluster == 1 else "NEUTRAL"
+    prediction_color = "danger" if prediction_label == 'DISRUPTIVE' else "success"
+    
+    # Risk/confidence score as a mock from distance to cluster center
+    risk_score = np.linalg.norm(scaled - kmeans.cluster_centers_[cluster])
+    confidence = int(max(0.6, 1 - risk_score) * 100)  # min 60% confidence
+    
+    # Prediction card
     mutation_string = f"{wildtype}{position}{mutant}"
-
-    # Prediction result
-    prediction_color = "danger" if prediction_data['prediction'] == 'DISRUPTIVE' else "success"
-    prediction_result = html.Div([
-        dbc.Alert([
-            html.H3(f"Prediction: {prediction_data['prediction']}", 
-                   className="mb-2 text-white fw-bold"),
-            html.P(f"Mutation: {mutation_string}", 
-                  className="mb-2 text-white fs-6"),
-            html.P(f"Confidence: {prediction_data['confidence']}%", 
-                  className="mb-1 text-white fs-5"),
-            html.P(f"Risk Score: {prediction_data['risk_score']:.2f}", 
-                  className="mb-0 text-white fs-5")
-        ], color=prediction_color, className="text-center py-4")
-    ])
-
+    prediction_result = dbc.Alert([
+        html.H3(f"Prediction: {prediction_label}", className="mb-2 text-white fw-bold"),
+        html.P(f"Mutation: {mutation_string}", className="mb-2 text-white fs-6"),
+        html.P(f"Confidence: {confidence}%", className="mb-1 text-white fs-5"),
+        html.P(f"Risk Score: {risk_score:.2f}", className="mb-0 text-white fs-5")
+    ], color=prediction_color, className="text-center py-4")
+    
     # Conservation plot
     conservation_plot = dcc.Graph(
         figure=create_conservation_plot(position),
         config={'displayModeBar': False},
         style={'height': '300px'}
     )
+    
+    # Feature breakdown (styled like your screenshot)
+    def style_level(value, thresholds):
+        if value >= thresholds[0]:
+            return "(High)", "#28a745"
+        elif value >= thresholds[1]:
+            return "(Medium)", "#ffc107"
+        else:
+            return "(Low)", "#dc3545"
+    
+    cons_label, cons_color = style_level(conservation_score, [0.9, 0.7])
+    entropy_label, entropy_color = style_level(shannon_entropy, [0.5, 1.0])
+    blosum_label, blosum_color = ("Favorable", "#28a745") if features_df['blosum_score'][0]>=0 else ("Unfavorable", "#dc3545")
+    charge_label, charge_color = style_level(features_df['charge_change'][0], [1,0.5])
+    hyd_label = "More hydrophobic" if features_df['hydrophobicity_change'][0] > 0 else "Less hydrophobic" if features_df['hydrophobicity_change'][0] < 0 else "No change"
 
-    # Feature breakdown list with real ML features
     feature_breakdown = html.Div([
-        # Conservation Score 
-        html.Div([
-            html.I(className="bi bi-circle-fill me-2", style={'color': '#17a2b8'}),
-            html.Span("Conservation Score: ", className="fw-bold"),
-            html.Span(f"{conservation_score:.3f} ", className="fw-bold"),
-            html.Span("(High)" if conservation_score >= 0.9 else "(Medium)" if conservation_score >= 0.7 else "(Low)", 
-                     style={'color': '#28a745' if conservation_score >= 0.9 else '#ffc107' if conservation_score >= 0.7 else '#dc3545'})
-        ], className="mb-3"),
-        
-        # Shannon Entropy
-        html.Div([
-            html.I(className="bi bi-circle-fill me-2", style={'color': '#17a2b8'}),
-            html.Span("Shannon Entropy: ", className="fw-bold"),
-            html.Span(f"{shannon_entropy:.3f} ", className="fw-bold"),
-            html.Span("(Low)" if shannon_entropy < 0.5 else "(Medium)" if shannon_entropy < 1.0 else "(High)", 
-                     style={'color': '#28a745' if shannon_entropy < 0.5 else '#ffc107' if shannon_entropy < 1.0 else '#dc3545'})
-        ], className="mb-3"),
-        
-        # BLOSUM Score 
-        html.Div([
-            html.I(className="bi bi-circle-fill me-2", style={'color': '#6f42c1'}),
-            html.Span("BLOSUM62 Score: ", className="fw-bold"),
-            html.Span(f"{prediction_data['blosum_score']} ", className="fw-bold"),
-            html.Span("(Unfavorable)" if prediction_data['blosum_score'] < 0 else "(Favorable)", 
-                     style={'color': '#dc3545' if prediction_data['blosum_score'] < 0 else '#28a745'})
-        ], className="mb-3"),
-        
-        # Charge Change 
-        html.Div([
-            html.I(className="bi bi-circle-fill me-2", style={'color': '#fd7e14'}),
-            html.Span("Charge Change: ", className="fw-bold"),
-            html.Span(f"{prediction_data['charge_change']:.1f} ", className="fw-bold"),
-            html.Span("(High)" if prediction_data['charge_change'] >= 1 else "(Low)", 
-                     style={'color': '#dc3545' if prediction_data['charge_change'] >= 1 else '#28a745'})
-        ], className="mb-3"),
-        
-        # AA Class Change 
-        html.Div([
-            html.I(className="bi bi-circle-fill me-2", style={'color': '#28a745'}),
-            html.Span("AA Class Change: ", className="fw-bold"),
-            html.Span("Yes " if prediction_data['class_change'] else "No ", className="fw-bold"),
-            html.Span(f"({prediction_data['wt_class']} → {prediction_data['mut_class']})" if prediction_data['class_change'] else f"(Both {prediction_data['wt_class']})", 
-                     style={'color': '#6c757d'})
-        ], className="mb-3"),
-        
-        # Hydrophobicity Change 
-        html.Div([
-            html.I(className="bi bi-circle-fill me-2", style={'color': '#17a2b8'}),
-            html.Span("Hydrophobicity Change: ", className="fw-bold"),
-            html.Span(f"{prediction_data['hydrophobicity_change']:+.1f}", className="fw-bold"),
-            html.Span(" (More hydrophobic)" if prediction_data['hydrophobicity_change'] > 0 else " (Less hydrophobic)" if prediction_data['hydrophobicity_change'] < 0 else " (No change)", 
-                     style={'color': '#6c757d'})
-        ], className="mb-3"),
-        
-        # Model status indicator
+        html.P(f"Conservation Score: {conservation_score:.3f} {cons_label}", style={'color': cons_color, 'fontWeight':'bold'}),
+        html.P(f"Shannon Entropy: {shannon_entropy:.3f} {entropy_label}", style={'color': entropy_color, 'fontWeight':'bold'}),
+        html.P(f"BLOSUM62 Score: {features_df['blosum_score'][0]} ({blosum_label})", style={'color': blosum_color, 'fontWeight':'bold'}),
+        html.P(f"Charge Change: {features_df['charge_change'][0]:.1f} ({charge_label})", style={'color': charge_color, 'fontWeight':'bold'}),
+        html.P(f"AA Class Change: {'Yes' if features_df['class_change'][0] else 'No'}", style={'fontWeight':'bold'}),
+        html.P(f"Hydrophobicity Change: {features_df['hydrophobicity_change'][0]:+.1f} ({hyd_label})", style={'fontWeight':'bold'}),
         html.Hr(),
-        html.Small(
-            "Predictions from trained Random Forest model", 
-            className="text-muted fst-italic",
-            style={'color': '#28a745' if ml_model else '#ffc107'}
-        )
+        html.Small("Predictions from trained KMeans model", className="text-muted fst-italic")
     ])
     
     return prediction_result, conservation_plot, feature_breakdown
