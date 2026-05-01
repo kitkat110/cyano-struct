@@ -6,4 +6,3 @@ data/*.cif
 data/*.fasta
 data/seq_calc_results.csv
 pdb_files/
-image.png
