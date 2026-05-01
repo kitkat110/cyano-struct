@@ -112,16 +112,11 @@ Then open [http://localhost:8050](http://localhost:8050) in your browser.
 ### Example
 A user selects position **1281 (wild-type: Aspartic Acid / ASP)** and chooses **Lysine (K)** as the mutant. CyanoStruct extracts the relevant biochemical features for the D→K substitution and returns a prediction of **DISRUPTIVE** with 99% confidence, driven by a charge change of 2.0 and an unfavorable BLOSUM62 score.
 
----
-
 ## Directory Structure
 
 ```
 cyano-struct/
 ├── data/                          # Sequence and conservation data
-│   ├── microcystis_sequences.fasta
-│   ├── aligned_microcystis_sequences.fasta
-│   ├── seq_calc_results.csv
 │   └── mapped_scores.csv
 ├── models/                        # Trained model files
 │   ├── gmm.pkl
@@ -137,7 +132,6 @@ cyano-struct/
 │   └── train_gmm.py
 ├── app.py                         # Dash dashboard
 ├── Dockerfile
-├── Makefile
 ├── requirements.txt
 └── README.md
 ```
