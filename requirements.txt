@@ -1,5 +1,20 @@
-biopython==1.86
-pydantic==2.12.5
-pandas==3.0.1
-numpy==2.4.1
-dash==4.1.0
+# Dashboard
+dash==4.0
+dash-bio==1.0.1
+dash-bootstrap-components==2.0.4
+plotly==5.24.1
+
+# Bioinformatics
+biopython==1.84
+
+# ML
+scikit-learn==1.5.2
+joblib==1.4.2
+
+# Data
+pandas==2.2.3
+numpy==1.26.4
+
+# Visualisation 
+matplotlib==3.9.2
+seaborn==0.13.2

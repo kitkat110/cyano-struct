@@ -9,7 +9,7 @@ Harmful cyanobacterial blooms are an increasing environmental and public health 
 
 CyanoStruct focuses on the **mcyA gene**, a major component of the microcystin synthetase (*mcyABC*) gene cluster responsible for toxin biosynthesis. Using sequence analysis and machine learning, CyanoStruct predicts how amino acid mutations in this gene may affect protein function and toxin production.
 
-
+![alt text](image.png)
 
 ## Features
 
