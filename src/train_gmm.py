@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import logging
 import os
 import numpy as np
 import pandas as pd
@@ -33,13 +34,18 @@ AA_PROPS = {
     'V': {'charge': 0, 'hydrophobicity': 4.2, 'class': 'nonpolar'}
 }
 
-def get_blosum_score(aa1, aa2, blosum62):
-    try:
-        return blosum62[(aa1, aa2)]
-    except:
-        return 0
+def build_mutation_dataset(mapped_scores_path='data/mapped_scores.csv', n_mutations=2000) -> pd.DataFrame:
+    """
+    Builds mutation dataset.
 
-def build_mutation_dataset(mapped_scores_path='data/mapped_scores.csv', n_mutations=2000):
+    Args:
+    mapped_scores_path: Location of the mapped scores file. 
+    n_mutations: Number of mutations to classify. 
+
+    Returns:
+        mut_df: Dataframe containing all mutation classifier variables.
+    """
+
     mapped_scores = pd.read_csv(mapped_scores_path)
     blosum62 = substitution_matrices.load("BLOSUM62")
     amino_acids = list(AA_PROPS.keys())
@@ -59,17 +65,32 @@ def build_mutation_dataset(mapped_scores_path='data/mapped_scores.csv', n_mutati
         mutations.append({
             'conservation_score': pos_data['Conservation_Score'],
             'shannon_entropy': pos_data['Shannon_Entropy'],
-            'blosum_score': get_blosum_score(wildtype, mutant, blosum62),
+            'blosum_score': blosum62[(wildtype, mutant)],
             'charge_change': abs(mut['charge'] - wt['charge']),
             'hydrophobicity_change': abs(mut['hydrophobicity'] - wt['hydrophobicity']),
             'class_change': int(mut['class'] != wt['class'])
         })
 
     mut_df = pd.DataFrame(mutations)
-    print(f"Built mutation dataset with {len(mut_df)} mutations")
+    logging.info(f"Built mutation dataset with {len(mut_df)} mutations")
     return mut_df
 
-def train_gmm(mut_df, n_components=3, random_state=42):
+def train_gmm(mut_df, n_components=3, random_state=42) -> tuple[GaussianMixture, StandardScaler, dict, pd.DataFrame]:
+    """
+    Takes in previously extracted variables to train a Gaussian Mixture Model.
+
+    Args:
+    mut_df: Dataframe containing all mutation classifier variables.
+    n_components: Number of clusters.
+    random_state: Initializes pseudo-random number generator to ensure reproducibility.
+
+    Returns:
+        gmm: This function does not return a value; it writes output to disk.
+        scaler: Scaler model.
+        cluster_names: Name of mutation impact categories (clusters).
+        mut_df: Final dataframe containing extracted variables and mutation impact predictions. 
+    """
+
     scaler = StandardScaler()
     x_scaled = scaler.fit_transform(mut_df)
 
@@ -94,31 +115,52 @@ def train_gmm(mut_df, n_components=3, random_state=42):
     }
     mut_df['cluster_label'] = mut_df['cluster'].map(cluster_names)
 
-    print(mut_df['cluster_label'].value_counts().to_string())
-    print(f"GMM converged: {gmm.converged_}, Log-likelihood: {gmm.lower_bound_:.3f}")
+    logging.info(mut_df['cluster_label'].value_counts().to_string())
+    logging.info(f"GMM converged: {gmm.converged_}, Log-likelihood: {gmm.lower_bound_:.3f}")
 
     return gmm, scaler, cluster_names, mut_df
 
-def plot_cluster_heatmap(mut_df):
-    features = ['conservation_score', 'shannon_entropy', 'blosum_score',
-                'charge_change', 'hydrophobicity_change', 'class_change']
+def plot_cluster_heatmap(mut_df) -> None:
+    """
+    Creates a heatmap of the mutation impact categories vs. variables to easily visualize patterns.
+
+    Args:
+    mut_df: Final dataframe containing extracted variables and mutation impact predictions.
+
+    Returns:
+        None: This function does not return a value; it writes output to disk.
+    """
+
+    features = ['conservation_score', 'shannon_entropy', 'blosum_score', 'charge_change', 'hydrophobicity_change', 'class_change']
     cluster_means = mut_df.groupby('cluster_label')[features].mean()
 
     fig, ax = plt.subplots(figsize=(9, 3))
-    sns.heatmap(cluster_means, annot=True, fmt='.2f',
-                cmap='RdYlGn', center=0, linewidths=0.5, ax=ax)
+    sns.heatmap(cluster_means, annot=True, fmt='.2f', cmap='RdYlGn', center=0, linewidths=0.5, ax=ax)
     ax.set_title('Mean feature value per cluster')
     plt.tight_layout()
     plt.savefig('models/cluster_heatmap.png', dpi=150, bbox_inches='tight')
-    print("Saved cluster heatmap to models/cluster_heatmap.png")
+    logging.info("Saved cluster heatmap to models/cluster_heatmap.png")
     plt.close()
 
-def save_models(gmm, scaler, cluster_names, output_dir='models/'):
+def save_models(gmm, scaler, cluster_names, output_dir='models/') -> None:
+    """
+    Pickles all machine learning models used.
+
+    Args:
+    gmm: Gaussian Mixture Model.
+    scalar: Scaler model.
+    cluster_names: Name of mutation impact categories (clusters).
+    output_dir: Location of the output files.
+
+    Returns:
+        None: This function does not return a value; it writes output to disk.
+    """
+
     os.makedirs(output_dir, exist_ok=True)
     joblib.dump(gmm,           os.path.join(output_dir, 'gmm.pkl'))
     joblib.dump(scaler,        os.path.join(output_dir, 'scaler.pkl'))
     joblib.dump(AA_PROPS,      os.path.join(output_dir, 'aa_properties.pkl'))
     joblib.dump(cluster_names, os.path.join(output_dir, 'cluster_names.pkl'))
-    print("Saved models to models/")
+    logging.info("Saved models to models/")
 
 

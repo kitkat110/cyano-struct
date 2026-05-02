@@ -80,19 +80,11 @@ def main():
     pdb_sequence, residue_nums = parse_pdb_sequence(cif_path=CIF_FILE)
 
     logging.info("Aligning sequences to PDB structure")
-    alignment_positions = get_alignment_positions(
-        fasta_path=ALIGNED_FILE,
-        pdb_sequence=pdb_sequence
-    )
+    alignment_positions = get_alignment_positions(fasta_path=ALIGNED_FILE, pdb_sequence=pdb_sequence)
 
     logging.info("Mapping conservation scores to PDB residues")
-    map_conservation_scores(
-        pdb_sequence=pdb_sequence,
-        residue_nums=residue_nums,
-        alignment_positions=alignment_positions,
-        seq_calc_path=SEQ_CALC_FILE,
-        output_path=MAPPED_FILE
-    )
+    map_conservation_scores(pdb_sequence=pdb_sequence, residue_nums=residue_nums, alignment_positions=alignment_positions,
+                            seq_calc_path=SEQ_CALC_FILE, output_path=MAPPED_FILE)
 
     logging.info("Building mutation dataset")
     mut_df = build_mutation_dataset(mapped_scores_path=MAPPED_FILE)

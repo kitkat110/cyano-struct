@@ -1,3 +1,4 @@
+import logging
 import os
 import dash_bio as dashbio
 import dash_bootstrap_components as dbc
@@ -30,13 +31,13 @@ except Exception as e:
 external_stylesheets = [dbc.themes.CERULEAN]
 app = Dash(__name__, external_stylesheets=external_stylesheets)
 
-# Load conservation data
+# Load residue position data
 def load_conservation_data():
     try:
         df = pd.read_csv("data/mapped_scores.csv")
         return df
     except FileNotFoundError:
-        print("Warning: data/mapped_scores.csv not found.")
+        logging.warning("Data/mapped_scores.csv not found.")
 
 conservation_df = load_conservation_data()
 print(f"Loaded conservation data for {len(conservation_df)} residues")
@@ -52,13 +53,6 @@ def get_residue_data_at_position(position):
     else:
         print("Residue position has no available data.") 
     return (residue_num, residue, conservation, entropy)
-
-# Helper function for BLOSUM score
-def get_blosum_score(aa1, aa2):
-    try:
-        return blosum62[(aa1, aa2)]
-    except:
-        return 0
 
 # Load 3D structure viewer
 pdb_dir = './pdb_files'
@@ -102,7 +96,7 @@ app.layout = dbc.Container([
                     html.H4("Mutation Input", className="mb-0 text-primary")
                 ]),
                 dbc.CardBody([
-                    # Top row: Position + Wild-Type side by side
+                    # Top row: Position + wild-type side by side
                     dbc.Row([
                         dbc.Col([
                             dbc.Label("Position:", className="fw-bold mb-1"),
@@ -163,7 +157,7 @@ app.layout = dbc.Container([
             ], className="shadow-sm", style={'height': '100%'})
         ], width=4), 
  
-        # Right column - Prediction Result
+        # Right column - Prediction results
         dbc.Col([
             dbc.Card([
                 dbc.CardHeader([
@@ -183,7 +177,7 @@ app.layout = dbc.Container([
  
     # Bottom row
     dbc.Row([
-        # Feature Analysis with plot on left, breakdown on right
+        # Feature analysis with plot on left + breakdown on right
         dbc.Col([
             dbc.Card([
                 dbc.CardHeader([
@@ -211,7 +205,7 @@ app.layout = dbc.Container([
             ], className="shadow-sm", style={'height': '100%', 'overflow': 'hidden'})
         ], width=6, style={'height': '100%'}),
         
-        # Structural View
+        # Structural view
         dbc.Col([
             dbc.Card([
                 dbc.CardHeader([
@@ -246,16 +240,16 @@ def update_wildtype_display(position):
     residue = get_residue_data_at_position(position)[1]
     return residue
 
+# Callback to update labelled residue on structural view
 @callback(
-    [Output('molecule-3d', 'labels'),
-     Output('molecule-3d', 'styles')],
+    Output('molecule-3d', 'labels'),
     Input('position-input', 'value'),
     prevent_initial_call=True
 )
 def update_molecule_visuals(position):
 
     if position is None:
-        return [], styles
+        return []
 
     pdb_index = int(position) - 1269
 
@@ -268,54 +262,20 @@ def update_molecule_visuals(position):
     )
 
     if atom is None:
-        return [], styles
+        return []
 
     pos = atom['positions']
     residue_name = atom.get('residue_name', '')
 
-    # ---------- LABEL ----------
-    labels = [{
+    return [{
         'text': f'{residue_name}{position}',
-        'position': {
-            'x': pos[0],
-            'y': pos[1],
-            'z': pos[2]
-        },
+        'position': {'x': pos[0], 'y': pos[1], 'z': pos[2]},
         'fontColor': '#ffffff',
         'font': 'Arial',
         'fontSize': 16,
         'showBackground': True,
         'backgroundColor': '#000000',
     }]
-
-    # ---------- STYLE ----------
-    highlight_styles = []
-
-    # ALL residues = grey
-    highlight_styles.append({
-        "visualization_type": "cartoon",
-        "color": "lightgrey"
-    })
-
-    # nearby residues = blue
-    nearby_range = range(pdb_index - 5, pdb_index + 6)
-
-    for nearby_idx in nearby_range:
-
-        highlight_styles.append({
-            "residue_index": nearby_idx,
-            "visualization_type": "cartoon",
-            "color": "blue"
-        })
-
-    # selected residue = red
-    highlight_styles.append({
-        "residue_index": pdb_index,
-        "visualization_type": "cartoon",
-        "color": "red"
-    })
-
-    return labels, highlight_styles
 
 # Callback to load and display molecule
 @callback(
@@ -345,7 +305,7 @@ def update_prediction(n_clicks, position, mutant):
     features_df = pd.DataFrame([[
         conservation_score,
         shannon_entropy,
-        get_blosum_score(wildtype, mutant),
+        blosum62[wildtype, mutant],
         abs(mut_props['charge'] - wt_props['charge']),
         abs(mut_props['hydrophobicity'] - wt_props['hydrophobicity']),
         int(mut_props['class'] != wt_props['class'])
@@ -363,7 +323,7 @@ def update_prediction(n_clicks, position, mutant):
     color_map = {'DISRUPTIVE': 'danger', 'MODERATE': 'warning', 'NEUTRAL': 'success'}
     prediction_color = color_map.get(prediction_label, 'secondary')
 
-    typicality = gmm.score_samples(scaled)[0] #Higher score = more typical
+    typicality = gmm.score_samples(scaled)[0] # Higher score = more typical
 
     # Prediction card
     mutation_string = f"{wildtype}{position}{mutant}"
@@ -388,7 +348,7 @@ def update_prediction(n_clicks, position, mutant):
         style={'height': '300px'}
     )
     
-    # Feature breakdown (styled like your screenshot)
+    # Feature breakdown
     def style_level(value, thresholds):
         if value >= thresholds[0]:
             return "(High)", "#28a745"
@@ -419,7 +379,7 @@ def update_prediction(n_clicks, position, mutant):
 def create_conservation_plot(mutation_position):
     fig = go.Figure()
     
-    # Plot your actual conservation data
+    # Plot the conservation data
     fig.add_trace(go.Scatter(
         x=conservation_df['PDB_ResNum'],
         y=conservation_df['Conservation_Score'],
